@@ -1,0 +1,179 @@
+from leadscorer.scoring.basic import (
+    LeadScore,
+    age_score,
+    has_retrofit_permit,
+    match_permits_to_property,
+    rank_candidates,
+    score_property,
+    size_score,
+)
+
+# -- age_score ----------------------------------------------------------
+
+
+def test_age_score_zero_at_threshold() -> None:
+    assert age_score({"year_built": 2012}, threshold_year=2012) == 0.0
+
+
+def test_age_score_zero_when_newer_than_threshold() -> None:
+    assert age_score({"year_built": 2018}, threshold_year=2012) == 0.0
+
+
+def test_age_score_scales_linearly_below_cap() -> None:
+    # 15 years past threshold, cap at 30 -> 0.5
+    assert age_score({"year_built": 1997}, threshold_year=2012, max_years_past_threshold=30) == 0.5
+
+
+def test_age_score_caps_at_one() -> None:
+    # 60 years past threshold, cap at 30 -> capped at 1.0, not 2.0
+    assert age_score({"year_built": 1952}, threshold_year=2012, max_years_past_threshold=30) == 1.0
+
+
+def test_age_score_prefers_year_renovated_over_year_built() -> None:
+    # Renovated in 2015 (newer than threshold) should score 0 even though
+    # originally built in 1950 -- renovation is the more relevant signal.
+    prop = {"year_built": 1950, "year_renovated": 2015}
+    assert age_score(prop, threshold_year=2012) == 0.0
+
+
+def test_age_score_zero_when_year_unknown() -> None:
+    assert age_score({}, threshold_year=2012) == 0.0
+
+
+# -- size_score -----------------------------------------------------------
+
+
+def test_size_score_caps_at_one() -> None:
+    assert size_score({"square_footage": 40000}, reference_sqft=20000) == 1.0
+
+
+def test_size_score_scales_linearly_below_cap() -> None:
+    assert size_score({"square_footage": 10000}, reference_sqft=20000) == 0.5
+
+
+def test_size_score_zero_when_unknown() -> None:
+    assert size_score({}, reference_sqft=20000) == 0.0
+
+
+# -- has_retrofit_permit ----------------------------------------------------
+
+
+def test_has_retrofit_permit_matches_description() -> None:
+    permits = [{"permit_type": "Electrical", "description": "LED lighting retrofit"}]
+    assert has_retrofit_permit(permits, retrofit_keywords=["lighting"]) is True
+
+
+def test_has_retrofit_permit_matches_permit_type() -> None:
+    permits = [{"permit_type": "Lighting Retrofit", "description": None}]
+    assert has_retrofit_permit(permits, retrofit_keywords=["lighting"]) is True
+
+
+def test_has_retrofit_permit_is_case_insensitive() -> None:
+    permits = [{"permit_type": None, "description": "Full LED Retrofit"}]
+    assert has_retrofit_permit(permits, retrofit_keywords=["led"]) is True
+
+
+def test_has_retrofit_permit_false_when_no_match() -> None:
+    permits = [{"permit_type": "Roofing", "description": "Roof replacement"}]
+    assert has_retrofit_permit(permits, retrofit_keywords=["lighting", "led"]) is False
+
+
+def test_has_retrofit_permit_false_for_empty_permits() -> None:
+    assert has_retrofit_permit([], retrofit_keywords=["lighting"]) is False
+
+
+def test_has_retrofit_permit_false_for_empty_keywords() -> None:
+    permits = [{"permit_type": "Electrical", "description": "LED lighting retrofit"}]
+    assert has_retrofit_permit(permits, retrofit_keywords=[]) is False
+
+
+# -- match_permits_to_property ---------------------------------------------
+
+
+def test_match_permits_to_property_by_parcel_id() -> None:
+    prop = {"parcel_id": "P-001", "address": "100 Main St"}
+    permits = [
+        {"parcel_id": "P-001", "address": "different address on file"},
+        {"parcel_id": "P-002", "address": "200 Unrelated Ave"},
+    ]
+    matched = match_permits_to_property(prop, permits)
+    assert len(matched) == 1
+    assert matched[0]["parcel_id"] == "P-001"
+
+
+def test_match_permits_to_property_falls_back_to_address() -> None:
+    prop = {"parcel_id": "P-001", "address": "100 Main St"}
+    permits = [{"parcel_id": None, "address": "100 MAIN   ST"}]
+    matched = match_permits_to_property(prop, permits)
+    assert len(matched) == 1
+
+
+def test_match_permits_to_property_no_match() -> None:
+    prop = {"parcel_id": "P-001", "address": "100 Main St"}
+    permits = [{"parcel_id": "P-999", "address": "200 Other Ave"}]
+    assert match_permits_to_property(prop, permits) == []
+
+
+# -- score_property -----------------------------------------------------
+
+
+_OLD_LARGE_PROPERTY = {"parcel_id": "P-001", "address": "100 Main St", "year_built": 1975, "square_footage": 60000}
+
+
+def test_score_property_qualifies_with_no_permits() -> None:
+    lead = score_property(_OLD_LARGE_PROPERTY, permits=[], threshold_year=2012, retrofit_keywords=["lighting"])
+    assert isinstance(lead, LeadScore)
+    assert lead.parcel_id == "P-001"
+    assert lead.score > 0
+
+
+def test_score_property_excluded_by_retrofit_permit() -> None:
+    permits = [{"permit_type": "Electrical", "description": "Lighting retrofit"}]
+    lead = score_property(_OLD_LARGE_PROPERTY, permits, threshold_year=2012, retrofit_keywords=["lighting"])
+    assert lead is None
+
+
+def test_score_property_excluded_when_too_new() -> None:
+    new_property = {"parcel_id": "P-002", "address": "200 New Ave", "year_built": 2018, "square_footage": 20000}
+    lead = score_property(new_property, permits=[], threshold_year=2012, retrofit_keywords=["lighting"])
+    assert lead is None
+
+
+def test_score_property_excluded_when_year_unknown() -> None:
+    unknown_year_property = {"parcel_id": "P-003", "address": "300 Unknown Ave", "square_footage": 20000}
+    lead = score_property(unknown_year_property, permits=[], threshold_year=2012, retrofit_keywords=["lighting"])
+    assert lead is None
+
+
+def test_score_property_combines_age_and_size() -> None:
+    small_old = {"parcel_id": "P-A", "address": "A", "year_built": 1975, "square_footage": 1000}
+    large_old = {"parcel_id": "P-B", "address": "B", "year_built": 1975, "square_footage": 60000}
+    lead_small = score_property(small_old, [], threshold_year=2012, retrofit_keywords=["lighting"])
+    lead_large = score_property(large_old, [], threshold_year=2012, retrofit_keywords=["lighting"])
+    assert lead_large.score > lead_small.score
+
+
+# -- rank_candidates ------------------------------------------------------
+
+
+def test_rank_candidates_orders_highest_score_first_and_drops_excluded() -> None:
+    properties = [
+        {"parcel_id": "P-001", "address": "100 Warehouse Way", "year_built": 1975, "square_footage": 60000},
+        {"parcel_id": "P-002", "address": "200 Small Office Dr", "year_built": 2000, "square_footage": 5000},
+        {"parcel_id": "P-003", "address": "300 Retrofit Rd", "year_built": 1980, "square_footage": 30000},
+        {"parcel_id": "P-004", "address": "400 New Build Blvd", "year_built": 2018, "square_footage": 15000},
+    ]
+    permits = [
+        {"parcel_id": "P-003", "permit_type": "Electrical", "description": "LED lighting retrofit"},
+    ]
+
+    ranked = rank_candidates(properties, permits, threshold_year=2012, retrofit_keywords=["lighting", "led"])
+
+    ranked_parcel_ids = [lead.parcel_id for lead in ranked]
+    assert ranked_parcel_ids == ["P-001", "P-002"]
+    assert ranked[0].score >= ranked[1].score
+
+
+def test_rank_candidates_empty_when_nothing_qualifies() -> None:
+    properties = [{"parcel_id": "P-001", "address": "100 Main St", "year_built": 2020, "square_footage": 5000}]
+    assert rank_candidates(properties, [], threshold_year=2012, retrofit_keywords=["lighting"]) == []
