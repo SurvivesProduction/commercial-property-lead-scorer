@@ -182,6 +182,30 @@ def test_score_property_combines_age_and_size() -> None:
     assert lead_large.score > lead_small.score
 
 
+def test_score_property_defaults_active_trader_license_false() -> None:
+    # A property_record with no active_trader_license key at all (every
+    # source except one that specifically populates it) must behave
+    # exactly as before this field existed.
+    lead = score_property(_OLD_LARGE_PROPERTY, permits=[], threshold_year=2012, retrofit_keywords=["lighting"])
+    assert lead.active_trader_license is False
+
+
+def test_score_property_carries_active_trader_license_true() -> None:
+    licensed_property = {**_OLD_LARGE_PROPERTY, "active_trader_license": True}
+    lead = score_property(licensed_property, permits=[], threshold_year=2012, retrofit_keywords=["lighting"])
+    assert lead.active_trader_license is True
+
+
+def test_score_property_does_not_change_score_based_on_active_trader_license() -> None:
+    # The deprioritization signal must never touch `score` itself -- see
+    # rank_candidates's docstring for where it actually applies.
+    unlicensed = score_property(_OLD_LARGE_PROPERTY, [], threshold_year=2012, retrofit_keywords=["lighting"])
+    licensed = score_property(
+        {**_OLD_LARGE_PROPERTY, "active_trader_license": True}, [], threshold_year=2012, retrofit_keywords=["lighting"]
+    )
+    assert unlicensed.score == licensed.score
+
+
 # -- rank_candidates ------------------------------------------------------
 
 
@@ -247,3 +271,73 @@ def test_rank_candidates_score_still_takes_priority_over_size() -> None:
 
     assert [lead.parcel_id for lead in ranked] == ["P-HIGH-SCORE", "P-LOW-SCORE"]
     assert ranked[0].score > ranked[1].score
+
+
+def test_rank_candidates_deprioritizes_active_trader_license_within_score_tie() -> None:
+    # Both properties tie at the max score -- an active Trader's License
+    # is a deprioritization tiebreak, not an exclusion: the licensed one
+    # still appears, just ranked below its unlicensed, equally-scored peer.
+    properties = [
+        {
+            "parcel_id": "P-LICENSED",
+            "address": "1 Active Retail Store",
+            "year_built": 1970,
+            "square_footage": 25000,
+            "active_trader_license": True,
+        },
+        {"parcel_id": "P-UNLICENSED", "address": "2 Quiet Warehouse", "year_built": 1970, "square_footage": 25000},
+    ]
+    ranked = rank_candidates(properties, [], threshold_year=2012, retrofit_keywords=["lighting"])
+
+    assert ranked[0].score == ranked[1].score
+    assert [lead.parcel_id for lead in ranked] == ["P-UNLICENSED", "P-LICENSED"]
+
+
+def test_rank_candidates_active_trader_license_does_not_override_a_genuinely_higher_score() -> None:
+    # The tiebreak must not become a full two-tier separation: a licensed
+    # property with a real higher score still outranks an unlicensed one
+    # with a lower score.
+    properties = [
+        {
+            "parcel_id": "P-LICENSED-HIGH-SCORE",
+            "address": "1 Big Old Licensed Building",
+            "year_built": 1960,
+            "square_footage": 300000,
+            "active_trader_license": True,
+        },
+        {
+            "parcel_id": "P-UNLICENSED-LOW-SCORE",
+            "address": "2 Small Newer Unlicensed Building",
+            "year_built": 2008,
+            "square_footage": 21000,
+        },
+    ]
+    ranked = rank_candidates(properties, [], threshold_year=2012, retrofit_keywords=["lighting"])
+
+    assert ranked[0].score > ranked[1].score
+    assert [lead.parcel_id for lead in ranked] == ["P-LICENSED-HIGH-SCORE", "P-UNLICENSED-LOW-SCORE"]
+
+
+def test_rank_candidates_active_trader_license_tiebreak_applies_before_square_footage() -> None:
+    # Tiebreak order: score, then active_trader_license, then sqft. A
+    # smaller unlicensed property must still beat a larger licensed one
+    # at the same score.
+    properties = [
+        {
+            "parcel_id": "P-LICENSED-LARGER",
+            "address": "1 Larger Licensed Building",
+            "year_built": 1970,
+            "square_footage": 100000,
+            "active_trader_license": True,
+        },
+        {
+            "parcel_id": "P-UNLICENSED-SMALLER",
+            "address": "2 Smaller Unlicensed Building",
+            "year_built": 1970,
+            "square_footage": 25000,
+        },
+    ]
+    ranked = rank_candidates(properties, [], threshold_year=2012, retrofit_keywords=["lighting"])
+
+    assert ranked[0].score == ranked[1].score
+    assert [lead.parcel_id for lead in ranked] == ["P-UNLICENSED-SMALLER", "P-LICENSED-LARGER"]

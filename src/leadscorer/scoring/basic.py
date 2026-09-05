@@ -160,6 +160,13 @@ class LeadScore:
     effective_year: int | None
     square_footage: int | None
     reasons: tuple[str, ...]
+    # Deprioritization signal, not a scoring input -- `score` above is
+    # deliberately unaffected by this field; see `rank_candidates`'s
+    # docstring for how it's used (a sort tiebreak, not a score penalty).
+    # Defaults to False so any property_record that doesn't carry this
+    # key (i.e. every source except one that specifically populates it)
+    # behaves exactly as before this field existed.
+    active_trader_license: bool = False
 
 
 def score_property(
@@ -188,6 +195,14 @@ def score_property(
     clear the age/permit bar are still meaningfully different leads if
     one is a 5,000 sq ft office built in 2011 and the other is a 60,000
     sq ft warehouse built in 1975.
+
+    Reads `property_record.get("active_trader_license")` generically (no
+    knowledge of where that flag came from -- e.g. the full/paid overlay
+    may join it on from an occupancy-confirmation source) and carries it
+    onto the returned `LeadScore` unchanged. This is deliberately NOT a
+    third scoring input alongside age/size: `score` here is unaffected by
+    it either way -- see `rank_candidates`'s docstring for where it
+    actually affects ordering.
     """
     if has_retrofit_permit(permits, retrofit_keywords):
         return None
@@ -217,6 +232,7 @@ def score_property(
         effective_year=effective_year,
         square_footage=square_footage,
         reasons=tuple(reasons),
+        active_trader_license=bool(property_record.get("active_trader_license", False)),
     )
 
 
@@ -235,10 +251,12 @@ def rank_candidates(
     `permits` is the full permit list for the client; each property's own
     permits are resolved via `match_permits_to_property` before scoring.
 
-    Ties break on `square_footage` (largest first, unknown treated as
-    smallest) rather than left in whatever order `properties` happened to
-    arrive in. This matters more than it sounds like it should: both
-    `age_score` and `size_score` cap at 1.0 (any property at/older than
+    Ties break on two factors, in order: first whether the property has
+    an `active_trader_license` (see `LeadScore`), then `square_footage`
+    (largest first, unknown treated as smallest) -- rather than left in
+    whatever order `properties` happened to arrive in. The square-footage
+    tiebreak matters more than it sounds like it should: both `age_score`
+    and `size_score` cap at 1.0 (any property at/older than
     `max_years_past_threshold` past `threshold_year`; any property at/over
     `reference_sqft`), so it's common for a large fraction of qualifying
     candidates to tie at the exact maximum combined score -- confirmed
@@ -248,9 +266,25 @@ def rank_candidates(
     order let a 23,100 sq ft building outrank a 259,502 sq ft one for no
     reason connected to the actual business signal (a bigger building is
     a bigger potential retrofit contract) -- the whole point of ranking
-    at all. This tiebreaker doesn't change any individual score or the
-    age/size weighting, only how equal scores are ordered against each
-    other.
+    at all.
+
+    The `active_trader_license` tiebreak is a genuine deprioritization
+    signal, not a scoring input: an active Trader's License (Maryland
+    requires one only for retail/goods-selling businesses) is a strong
+    positive occupancy signal a candidate shouldn't be excluded or
+    score-penalized for -- most legitimate targets (warehouses, offices,
+    industrial) will never have one, so its *absence* means nothing. Its
+    *presence*, though, is worth deprioritizing slightly: among
+    similarly-scored candidates, one without any sign of an active
+    retail tenant is a more promising outreach target than one that's
+    evidently already an operating retail business. This only breaks
+    ties/near-ties -- a candidate with a genuinely higher `score` still
+    outranks one without, regardless of license status; this can't
+    override the primary age+size signal, only nudge within it.
+
+    Neither tiebreaker changes any individual `score` or the age/size
+    weighting, only how equal (or near-equal) scores are ordered against
+    each other.
     """
     scored = []
     for property_record in properties:
@@ -268,4 +302,8 @@ def rank_candidates(
         if lead is not None:
             scored.append(lead)
 
-    return sorted(scored, key=lambda lead: (lead.score, lead.square_footage or 0), reverse=True)
+    return sorted(
+        scored,
+        key=lambda lead: (lead.score, not lead.active_trader_license, lead.square_footage or 0),
+        reverse=True,
+    )
