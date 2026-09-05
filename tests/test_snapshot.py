@@ -27,6 +27,7 @@ def test_candidate_snapshot_fields_extracts_reportable_fields() -> None:
         effective_year=1975,
         square_footage=60000,
         reasons=("example reason",),
+        active_trader_license=True,
     )
     assert candidate_snapshot_fields(lead) == {
         "parcel_id": "P-001",
@@ -34,7 +35,22 @@ def test_candidate_snapshot_fields_extracts_reportable_fields() -> None:
         "score": 0.9,
         "effective_year": 1975,
         "square_footage": 60000,
+        "active_trader_license": True,
     }
+
+
+def test_candidate_snapshot_fields_defaults_active_trader_license_false() -> None:
+    lead = LeadScore(
+        parcel_id="P-001",
+        address="100 Example Warehouse Way",
+        score=0.9,
+        age_component=1.0,
+        size_component=0.8,
+        effective_year=1975,
+        square_footage=60000,
+        reasons=("example reason",),
+    )
+    assert candidate_snapshot_fields(lead)["active_trader_license"] is False
 
 
 # -- diff_candidate_snapshots ---------------------------------------------

@@ -24,9 +24,15 @@ def candidate_snapshot_fields(lead: LeadScore) -> dict[str, Any]:
 
     Deliberately just the fields a recipient or a future report would
     want to see again for a candidate that's since dropped off (address,
-    score, year, size) -- not `age_component`/`size_component`/`reasons`,
-    which are score-explanation detail rather than identifying/reporting
-    fields.
+    score, year, size, license status) -- not `age_component`/
+    `size_component`/`reasons`, which are score-explanation detail rather
+    than identifying/reporting fields.
+
+    Includes `active_trader_license` -- already computed by `score_property`
+    (it never affects `score` itself, only `rank_candidates`'s tiebreak
+    order; see that function's docstring) -- so presentation layers
+    downstream (e.g. the full/paid overlay's HTML badge rendering) can
+    show it without needing their own copy of a `LeadScore`.
     """
     return {
         "parcel_id": lead.parcel_id,
@@ -34,6 +40,7 @@ def candidate_snapshot_fields(lead: LeadScore) -> dict[str, Any]:
         "score": lead.score,
         "effective_year": lead.effective_year,
         "square_footage": lead.square_footage,
+        "active_trader_license": lead.active_trader_license,
     }
 
 
