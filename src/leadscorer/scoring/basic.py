@@ -115,12 +115,22 @@ def size_score(property_record: dict[str, Any], reference_sqft: int = 20_000) ->
     Linear, capped at 1.0 at `reference_sqft` -- a building at or above
     that size scores the max; `reference_sqft` is a generic default for
     "large commercial building", meant to be tuned per client/region
-    rather than treated as a universal truth. Returns 0.0 if square
-    footage isn't known.
+    rather than treated as a universal truth.
+
+    Returns a neutral 0.5 (not 0.0) when square footage isn't known --
+    either missing entirely or an on-file value of 0, which real
+    assessment sources use interchangeably to mean "no structure-area
+    figure on file" (a building can't genuinely be 0 sq ft). Scoring
+    unknown as 0.0 would treat "we don't know the size" the same as
+    "confirmed smallest possible", unfairly burying an old building that
+    simply lacks a square-footage figure -- common in real data (e.g.
+    ~1/3 of Maryland SDAT commercial records) -- below a confirmed-small
+    one it may well be larger than. 0.5 is neutral on the 0-1 scale:
+    neither rewarded nor penalized for the unknown dimension.
     """
     square_footage = property_record.get("square_footage")
     if not square_footage:
-        return 0.0
+        return 0.5
     return min(square_footage / reference_sqft, 1.0)
 
 

@@ -51,8 +51,16 @@ def test_size_score_scales_linearly_below_cap() -> None:
     assert size_score({"square_footage": 10000}, reference_sqft=20000) == 0.5
 
 
-def test_size_score_zero_when_unknown() -> None:
-    assert size_score({}, reference_sqft=20000) == 0.0
+def test_size_score_neutral_when_missing() -> None:
+    # No square_footage key at all -- unknown, not "confirmed smallest".
+    assert size_score({}, reference_sqft=20000) == 0.5
+
+
+def test_size_score_neutral_when_zero() -> None:
+    # Real assessment sources (e.g. Maryland SDAT) use 0 to mean "no
+    # structure-area figure on file", not a genuine 0 sq ft building --
+    # treated the same as missing.
+    assert size_score({"square_footage": 0}, reference_sqft=20000) == 0.5
 
 
 # -- has_retrofit_permit ----------------------------------------------------
