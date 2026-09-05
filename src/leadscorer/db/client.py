@@ -168,3 +168,81 @@ def permits_for_client(conn: psycopg.Connection, client_id: str) -> list[dict[st
     with conn.cursor(row_factory=dict_row) as cur:
         cur.execute("select * from permits where client_id = %(client_id)s", {"client_id": client_id})
         return cur.fetchall()
+
+
+def latest_candidate_snapshot(conn: psycopg.Connection, client_id: str) -> list[dict[str, Any]]:
+    """Return every `candidate_snapshots` row from `client_id`'s most recent run.
+
+    Returns `[]` if no snapshot has ever been saved for this client --
+    the correct "no prior run yet" input to
+    `leadscorer.snapshot.diff_candidate_snapshots`, which treats an empty
+    `previous` as "everything currently qualifying is new."
+    """
+    query = """
+        select parcel_id, address, score, effective_year, square_footage
+        from candidate_snapshots
+        where client_id = %(client_id)s
+          and run_at = (
+              select max(run_at) from candidate_snapshots where client_id = %(client_id)s
+          )
+    """
+    with conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(query, {"client_id": client_id})
+        return cur.fetchall()
+
+
+def save_candidate_snapshot(
+    conn: psycopg.Connection, client_id: str, run_at: Any, candidates: list[dict[str, Any]]
+) -> None:
+    """Persist this run's full qualifying-candidate set as a new snapshot.
+
+    `candidates` must be `leadscorer.snapshot.candidate_snapshot_fields`-shaped
+    dicts. `run_at` is a single timestamp shared by every row this call
+    inserts (the caller's run time, not `now()` per row) so "the most
+    recent snapshot" reliably means "every candidate from one specific
+    run," not a mix of rows from a run that happened to straddle a clock
+    tick. A no-op for an empty `candidates` list -- avoids a pointless
+    round trip when nothing qualified.
+    """
+    if not candidates:
+        return
+    query = """
+        insert into candidate_snapshots (
+            client_id, run_at, parcel_id, address, score, effective_year, square_footage
+        ) values (
+            %(client_id)s, %(run_at)s, %(parcel_id)s, %(address)s, %(score)s,
+            %(effective_year)s, %(square_footage)s
+        )
+        on conflict (client_id, run_at, parcel_id) do nothing
+    """
+    with conn.cursor() as cur:
+        cur.executemany(query, [{"client_id": client_id, "run_at": run_at, **c} for c in candidates])
+    conn.commit()
+
+
+def save_candidate_dropouts(
+    conn: psycopg.Connection, client_id: str, run_at: Any, dropped: list[dict[str, Any]]
+) -> None:
+    """Persist this run's dropped-off candidates for historical retention.
+
+    `dropped` must be `leadscorer.snapshot.candidate_snapshot_fields`-shaped
+    dicts (their LAST-KNOWN fields, from the prior snapshot -- see
+    `diff_candidate_snapshots`). Kept in a companion table rather than the
+    same `candidate_snapshots` rows so that table's meaning never depends
+    on a status filter -- see `migrations/002_candidate_snapshots.sql`.
+    A no-op for an empty `dropped` list.
+    """
+    if not dropped:
+        return
+    query = """
+        insert into candidate_dropouts (
+            client_id, run_at, parcel_id, address, last_score, last_effective_year, last_square_footage
+        ) values (
+            %(client_id)s, %(run_at)s, %(parcel_id)s, %(address)s, %(score)s,
+            %(effective_year)s, %(square_footage)s
+        )
+        on conflict (client_id, run_at, parcel_id) do nothing
+    """
+    with conn.cursor() as cur:
+        cur.executemany(query, [{"client_id": client_id, "run_at": run_at, **c} for c in dropped])
+    conn.commit()
