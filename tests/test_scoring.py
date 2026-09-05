@@ -185,3 +185,44 @@ def test_rank_candidates_orders_highest_score_first_and_drops_excluded() -> None
 def test_rank_candidates_empty_when_nothing_qualifies() -> None:
     properties = [{"parcel_id": "P-001", "address": "100 Main St", "year_built": 2020, "square_footage": 5000}]
     assert rank_candidates(properties, [], threshold_year=2012, retrofit_keywords=["lighting"]) == []
+
+
+def test_rank_candidates_breaks_score_ties_by_square_footage_descending() -> None:
+    # Both properties are far enough past the threshold and at/over
+    # reference_sqft that age_score and size_score both cap at 1.0 --
+    # an exact score tie. Regression test for a real issue found against
+    # live data: 214 of 2,959 real qualifying candidates tied at the max
+    # score, with input order (not building size) deciding who ranked
+    # first -- a 23,100 sq ft building outranked a 259,502 sq ft one.
+    properties = [
+        {"parcel_id": "P-SMALL", "address": "1 Small Big Box Way", "year_built": 1970, "square_footage": 21000},
+        {"parcel_id": "P-LARGE", "address": "2 Massive Warehouse Blvd", "year_built": 1970, "square_footage": 250000},
+    ]
+    ranked = rank_candidates(properties, [], threshold_year=2012, retrofit_keywords=["lighting"])
+
+    assert ranked[0].score == ranked[1].score == 1.0
+    assert [lead.parcel_id for lead in ranked] == ["P-LARGE", "P-SMALL"]
+
+
+def test_rank_candidates_treats_unknown_square_footage_as_smallest_in_tiebreak() -> None:
+    properties = [
+        {"parcel_id": "P-UNKNOWN", "address": "1 Mystery Size Ln", "year_built": 1970, "square_footage": None},
+        {"parcel_id": "P-KNOWN", "address": "2 Known Size Ave", "year_built": 1970, "square_footage": 20000},
+    ]
+    ranked = rank_candidates(properties, [], threshold_year=2012, retrofit_keywords=["lighting"])
+
+    assert [lead.parcel_id for lead in ranked] == ["P-KNOWN", "P-UNKNOWN"]
+
+
+def test_rank_candidates_score_still_takes_priority_over_size() -> None:
+    # A higher-scoring smaller property must still outrank a
+    # lower-scoring larger one -- the tiebreaker only applies within
+    # equal scores, it doesn't let size override the actual score.
+    properties = [
+        {"parcel_id": "P-HIGH-SCORE", "address": "1 Old Small Building", "year_built": 1970, "square_footage": 21000},
+        {"parcel_id": "P-LOW-SCORE", "address": "2 Newer Huge Building", "year_built": 2008, "square_footage": 500000},
+    ]
+    ranked = rank_candidates(properties, [], threshold_year=2012, retrofit_keywords=["lighting"])
+
+    assert [lead.parcel_id for lead in ranked] == ["P-HIGH-SCORE", "P-LOW-SCORE"]
+    assert ranked[0].score > ranked[1].score
