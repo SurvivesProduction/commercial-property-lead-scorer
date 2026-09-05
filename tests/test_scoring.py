@@ -122,6 +122,27 @@ def test_match_permits_to_property_no_match() -> None:
     assert match_permits_to_property(prop, permits) == []
 
 
+def test_match_permits_to_property_matches_despite_permit_city_zip_suffix() -> None:
+    # Regression test for the real bug found live: Anne Arundel's Accela
+    # permit portal appends ", CITY ZIP" to ~99.9% of addresses
+    # (e.g. "2839 JESSUP RD, HANOVER 21076") while Maryland's Socrata
+    # property source never does ("2839 JESSUP RD") -- this alone made
+    # every cross-source match fail regardless of real-world overlap.
+    prop = {"parcel_id": None, "address": "2839 JESSUP RD"}
+    permits = [{"parcel_id": None, "address": "2839 Jessup Rd, Hanover 21076"}]
+    matched = match_permits_to_property(prop, permits)
+    assert len(matched) == 1
+
+
+def test_match_permits_to_property_no_match_when_street_genuinely_differs_despite_suffix() -> None:
+    # The comma-stripping fix must not become a looser match than
+    # intended -- a permit at a different street should still not match
+    # just because both addresses happen to carry a city/zip-shaped tail.
+    prop = {"parcel_id": None, "address": "100 Main St"}
+    permits = [{"parcel_id": None, "address": "200 Other Ave, Glen Burnie 21061"}]
+    assert match_permits_to_property(prop, permits) == []
+
+
 # -- score_property -----------------------------------------------------
 
 

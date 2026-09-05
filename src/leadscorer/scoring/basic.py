@@ -21,17 +21,31 @@ from typing import Any
 
 
 def _normalize_address(address: str | None) -> str | None:
-    """Lowercase and collapse whitespace for address-based matching.
+    """Strip a trailing city/zip suffix, then lowercase and collapse whitespace.
 
-    Deliberately minimal -- no abbreviation expansion (e.g. "St" vs
-    "Street"), no unit-number stripping. Real permit/assessment portals
-    haven't been inspected yet (see this repo's README), so a real
-    normalization strategy should be built against real address formats
-    from both sources, not guessed here.
+    Confirmed live against two real sources (Maryland Socrata property
+    assessments and Anne Arundel County's Accela permit portal): the
+    property side never includes a city/zip (`"2839 JESSUP RD"`), while
+    the permit side appends one after a comma on ~99.9% of records
+    (`"406 HOLLY DR, ANNAPOLIS 21403"`). That structural difference alone
+    made every cross-source match fail regardless of whether the
+    underlying real-world address overlapped -- confirmed live that
+    stripping just this suffix recovered exact matches immediately, with
+    zero abbreviation differences (e.g. "St" vs "Street") found on either
+    side once it's gone, so no further normalization was needed to fix
+    the real, measured problem. Safe to apply unconditionally: an address
+    with no comma (either source, or a future one) is returned unchanged
+    aside from case/whitespace, same as before.
+
+    Still deliberately minimal beyond that -- no abbreviation expansion,
+    no unit-number stripping -- since there's no live evidence either is
+    needed yet; add them if a future source's real data shows otherwise,
+    not preemptively.
     """
     if not address:
         return None
-    return re.sub(r"\s+", " ", address.strip().lower())
+    street_only = address.split(",")[0]
+    return re.sub(r"\s+", " ", street_only.strip().lower())
 
 
 def match_permits_to_property(
