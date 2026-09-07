@@ -220,6 +220,59 @@ def save_candidate_snapshot(
     conn.commit()
 
 
+def occupancy_checks_for_client(conn: psycopg.Connection, client_id: str) -> dict[str, dict[str, Any]]:
+    """Return every stored occupancy-check result for `client_id`, keyed by `parcel_id`.
+
+    Each value is `{"active_trader_license": bool, "checked_at": datetime}`
+    -- the shape `leadscorer.occupancy.select_parcels_needing_check` expects
+    for its `stored_checked_at` argument (via `{k: v["checked_at"] for k, v
+    in ...}`) and that a caller merging results back onto property dicts
+    can use directly. Returns `{}` if nothing has ever been checked for
+    this client -- the correct "check everything qualifying" input on a
+    client's first run.
+    """
+    query = """
+        select parcel_id, active_trader_license, checked_at
+        from occupancy_checks
+        where client_id = %(client_id)s
+    """
+    with conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(query, {"client_id": client_id})
+        rows = cur.fetchall()
+    return {
+        row["parcel_id"]: {"active_trader_license": row["active_trader_license"], "checked_at": row["checked_at"]}
+        for row in rows
+    }
+
+
+def save_occupancy_checks(conn: psycopg.Connection, client_id: str, results: list[dict[str, Any]]) -> None:
+    """Persist fresh occupancy-check results, one row per parcel (upsert).
+
+    `results` items must carry `parcel_id`, `address`, `active_trader_license`,
+    and `checked_at`. Unlike `candidate_snapshots` (one row per run), this
+    is one row per parcel -- a re-check overwrites the prior result, since
+    only the current occupancy status matters, not its history. A no-op
+    for an empty `results` list.
+    """
+    if not results:
+        return
+    query = """
+        insert into occupancy_checks (
+            client_id, parcel_id, address, active_trader_license, checked_at
+        ) values (
+            %(client_id)s, %(parcel_id)s, %(address)s, %(active_trader_license)s, %(checked_at)s
+        )
+        on conflict (client_id, parcel_id) do update set
+            address = excluded.address,
+            active_trader_license = excluded.active_trader_license,
+            checked_at = excluded.checked_at,
+            updated_at = now()
+    """
+    with conn.cursor() as cur:
+        cur.executemany(query, [{"client_id": client_id, **r} for r in results])
+    conn.commit()
+
+
 def save_candidate_dropouts(
     conn: psycopg.Connection, client_id: str, run_at: Any, dropped: list[dict[str, Any]]
 ) -> None:
