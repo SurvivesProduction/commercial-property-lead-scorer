@@ -4,6 +4,8 @@ Public template: cross-references commercial property assessment records against
 
 This is the generic/free version -- no real portal targets, no client-specific age thresholds or retrofit keywords, no alerting. See the full build for a real client deployment: [commercial-property-lead-scorer-full](../commercial-property-lead-scorer-full).
 
+**Deployment note:** this repo also exists as a second clone on the deployment machine (under `Desktop\SurvivesProduction-001\...\tool2-commercial-property-lead-scorer\commercial-property-lead-scorer`), installed editable into the deploy venvs the scheduled jobs use. GitHub is the single source of truth -- that copy must only be updated via `git pull`, never edited directly. See `commercial-property-lead-scorer-full`'s README for the full deployment picture.
+
 ## What this is
 
 `leadscorer` is a small, reusable framework for turning "a property assessment source + a permit source" into a ranked list of retrofit-lead candidates:

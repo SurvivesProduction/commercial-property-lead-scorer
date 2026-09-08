@@ -54,6 +54,8 @@ def _property_content_params(record: PropertyRecord) -> dict[str, Any]:
         "owner_name": record.owner_name,
         "owner_mailing_address": record.owner_mailing_address,
         "raw_data": Jsonb(record.raw_data),
+        "needs_review": record.needs_review,
+        "review_reason": record.review_reason,
     }
 
 
@@ -69,12 +71,14 @@ def upsert_property(conn: psycopg.Connection, record: PropertyRecord) -> dict[st
         insert into properties (
             client_id, source, parcel_id, address, city, county, state,
             zip_code, year_built, year_renovated, square_footage,
-            property_use, owner_name, owner_mailing_address, raw_data
+            property_use, owner_name, owner_mailing_address, raw_data,
+            needs_review, review_reason
         ) values (
             %(client_id)s, %(source)s, %(parcel_id)s, %(address)s, %(city)s,
             %(county)s, %(state)s, %(zip_code)s, %(year_built)s,
             %(year_renovated)s, %(square_footage)s, %(property_use)s,
-            %(owner_name)s, %(owner_mailing_address)s, %(raw_data)s
+            %(owner_name)s, %(owner_mailing_address)s, %(raw_data)s,
+            %(needs_review)s, %(review_reason)s
         )
         on conflict (client_id, source, parcel_id) do update set
             address = excluded.address,
@@ -89,6 +93,8 @@ def upsert_property(conn: psycopg.Connection, record: PropertyRecord) -> dict[st
             owner_name = excluded.owner_name,
             owner_mailing_address = excluded.owner_mailing_address,
             raw_data = excluded.raw_data,
+            needs_review = excluded.needs_review,
+            review_reason = excluded.review_reason,
             last_seen_at = now(),
             updated_at = now()
         returning *

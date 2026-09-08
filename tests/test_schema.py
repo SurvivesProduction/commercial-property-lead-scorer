@@ -45,6 +45,27 @@ def test_property_record_requires_core_fields() -> None:
         PropertyRecord(client_id="demo", source="example-source")
 
 
+def test_property_record_defaults_needs_review_to_false() -> None:
+    prop = PropertyRecord(
+        client_id="demo", source="example-source", parcel_id="P-001", address="100 Example Warehouse Way"
+    )
+    assert prop.needs_review is False
+    assert prop.review_reason is None
+
+
+def test_property_record_accepts_needs_review_flag_and_reason() -> None:
+    prop = PropertyRecord(
+        client_id="demo",
+        source="example-source",
+        parcel_id="P-002",
+        address="",
+        needs_review=True,
+        review_reason="missing address (primary and every fallback field blank)",
+    )
+    assert prop.needs_review is True
+    assert "missing address" in prop.review_reason
+
+
 def test_permit_record_accepts_full_valid_record() -> None:
     permit = PermitRecord(
         client_id="demo",
