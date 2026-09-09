@@ -17,9 +17,9 @@ This is the generic/free version -- no real portal targets, no client-specific a
 
 It intentionally does not include any real scraping targets, client identifiers, age thresholds, retrofit keywords, or hosting-provider-specific wiring (e.g. Supabase). Those live in a paid/full deployment layer that installs this package as a dependency and adds the client-specific pieces on top.
 
-## Why no real scraper yet
+## Real scrapers live in the full repo
 
-The real Maryland source portals (property tax assessment -- likely Maryland SDAT or a county assessment site -- and permit history, likely a county/city permit portal) haven't been manually inspected yet. Per the same data-source-refinement workflow used for Tool 1's AACPS scraper, a scraper doesn't get built against a real portal until that inspection (static HTML vs. JS-rendered, search-form gating, CAPTCHAs, registration walls) has actually happened -- guessing at portal structure produces scrapers that silently break or silently misparse. `scripts/run_scraper.py` demonstrates the full framework against a small hardcoded synthetic dataset instead.
+This public package still ships no real scraping targets by design (see "What this is" above) -- but real ones do exist now, in [commercial-property-lead-scorer-full](../commercial-property-lead-scorer-full): a property-assessment scraper against Maryland's Socrata open-data API (Anne Arundel County commercial parcels) and a permit scraper against Anne Arundel County's Accela permit portal. Both were built only after manually inspecting the real portal first (per the same data-source-refinement workflow used for Tool 1's AACPS scraper) -- Socrata turned out to be a documented, queryable open-data API rather than an HTML portal, worth checking for before assuming a scraper is the only option for a government data source. `scripts/run_scraper.py` here still demonstrates the generic framework against a small hardcoded synthetic dataset, independent of either real scraper.
 
 ## Install
 
@@ -45,7 +45,7 @@ cp .env.example .env
 python scripts/migrate.py
 ```
 
-This applies every SQL file under `src/leadscorer/migrations/` (currently just `001_init_schema.sql`, which creates `properties` and `permits`) in order. Every migration is written with `if not exists` guards, so it's safe to rerun.
+This applies every SQL file under `src/leadscorer/migrations/` in order: `001_init_schema.sql` (creates `properties` and `permits`), `002_candidate_snapshots.sql` (novelty-gate history), `003_occupancy_checks.sql` (cached live occupancy checks), and `004_add_needs_review.sql` (`needs_review`/`review_reason` on `properties`). Every migration is written with `if not exists` guards, so it's safe to rerun.
 
 ## Run the demo scraper
 
@@ -64,7 +64,10 @@ This runs two template scraper subclasses that read from small hardcoded in-memo
   - `match_permits_to_property` links a property to its permits (by `parcel_id` if both sources expose one, falling back to a normalized address match).
   - `has_retrofit_permit` checks whether any linked permit's type/description matches a caller-supplied keyword list.
   - `score_property` applies two hard qualifying conditions (no retrofit permit on file, and a known construction/renovation year older than a caller-supplied threshold) and, for properties that qualify, a continuous weighted score combining building age and square footage -- so results are a ranked list, not a flat yes/no filter. `size_score` treats unknown/zero square footage as neutral (0.5), not smallest-possible (0.0) -- a real assessment source can easily have a construction year on file with no square-footage figure, and scoring that the same as a confirmed-tiny building would be wrong.
-  - `rank_candidates` runs this over every property/permit pair for a client and returns the qualifying candidates sorted highest-score-first.
+  - `rank_candidates` runs this over every property/permit pair for a client and returns the qualifying candidates sorted highest-score-first. Ties break first on `active_trader_license` (candidates without one rank higher -- an active retail license is a mild deprioritization signal, not a scoring input), then on square footage.
+- **`leadscorer.snapshot`** -- novelty-gate support: `candidate_snapshot_fields`/`diff_candidate_snapshots` diff a ranked candidate list against a prior run's snapshot (persisted via `leadscorer.db.client.save_candidate_snapshot`/`save_candidate_dropouts`) so a digest can report only what's newly qualifying or newly dropped off, not the full list every time.
+- **`leadscorer.occupancy`** -- `select_parcels_needing_check` decides which currently-qualifying candidates need a fresh live occupancy check this run (never checked before, or the last check aged past a refresh window), bounding how often an external live-occupancy source needs to be hit.
+- **`PropertyRecord.needs_review`/`review_reason`** -- set directly by a scraper's own `normalize()` (unlike Tool 1's DB-computed `needs_review`, since this tool has no fuzzy-match tier to derive a review-worthiness signal from) when a required field comes back missing or unparseable, so a bad record surfaces for a human instead of silently shipping something unusable.
 
 A downstream deployment (like the full/paid repo) adds concrete scraper subclasses for real portals, the client's actual age threshold and retrofit keywords, client_id-tagged wiring, and digest integration on top -- without needing to touch or fork this package's code.
 
@@ -75,4 +78,4 @@ pip install -e ".[dev]"
 pytest
 ```
 
-Covers the pure scoring/cross-reference functions (`age_score`, `size_score`, `has_retrofit_permit`, `match_permits_to_property`, `score_property`, `rank_candidates`) against synthetic data, and `PropertyRecord`/`PermitRecord` schema validation -- all testable without a live database or a real scraped portal.
+Covers the pure scoring/cross-reference functions (`age_score`, `size_score`, `has_retrofit_permit`, `match_permits_to_property`, `score_property`, `rank_candidates`), the novelty-gate diff logic (`diff_candidate_snapshots`), the occupancy-check scoping logic (`select_parcels_needing_check`), and `PropertyRecord`/`PermitRecord` schema validation -- all testable without a live database or a real scraped portal.

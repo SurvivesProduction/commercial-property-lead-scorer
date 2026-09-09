@@ -3,14 +3,19 @@
 -- Written to be safe to rerun (idempotent): every statement uses an
 -- `if not exists` guard.
 --
--- Tool 2's pipeline is stateless (live-fetch-and-rank every run, nothing
--- persisted) -- these two tables are the minimal state needed to answer
--- "which qualifying candidates are new since the last run" without
--- inventing a new persistence layer: one row per (client, run, parcel)
--- for whatever qualified, plus a companion table logging whatever
--- dropped off, so that history is retained even though the digest's
--- primary content only surfaces new candidates for now (see
--- leadscorer_full's ARCHITECTURE.md for the reasoning).
+-- The RANKING step itself is stateless (rank_candidates recomputes the
+-- full ranked list fresh from `properties`/`permits` every run, nothing
+-- about a candidate's rank/score is stored between runs) even though
+-- `properties`/`permits` themselves ARE persisted (via upsert_property/
+-- upsert_permit) -- these two tables are the minimal ADDITIONAL state
+-- needed to answer "which qualifying candidates are new since the last
+-- run," a question the persisted property/permit rows alone can't answer
+-- (they don't record which ones scored high enough to qualify on any
+-- given past run). One row per (client, run, parcel) for whatever
+-- qualified, plus a companion table logging whatever dropped off, so
+-- that history is retained even though the digest's primary content only
+-- surfaces new candidates for now (see leadscorer_full's ARCHITECTURE.md
+-- for the reasoning).
 --
 -- candidate_snapshots always means "what qualified as of this run" --
 -- no status column, so a query for "the latest snapshot" never needs a
